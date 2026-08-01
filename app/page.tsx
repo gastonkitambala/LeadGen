@@ -32,6 +32,18 @@ function loadContacted(): Set<string> {
   }
 }
 
+/** Descending comparator that always sorts records missing the value to the bottom. */
+function byOptionalDesc(select: (b: Business) => number | undefined) {
+  return (a: Business, b: Business) => {
+    const left = select(a);
+    const right = select(b);
+    if (left === undefined && right === undefined) return 0;
+    if (left === undefined) return 1;
+    if (right === undefined) return -1;
+    return right - left;
+  };
+}
+
 function saveContacted(ids: Set<string>) {
   try {
     localStorage.setItem(CONTACTED_KEY, JSON.stringify(Array.from(ids)));
@@ -45,6 +57,12 @@ const DEFAULT_FILTER: FilterState = {
   minReviews: 0,
 };
 
+const SOURCE_LABELS: Record<string, string> = {
+  mock: "Demo data",
+  osm: "OpenStreetMap",
+  "osm+foursquare": "OpenStreetMap + Foursquare",
+};
+
 const TICKER_ITEMS = [
   "12,400+ businesses found last month",
   "Avg cold pitch reply rate: 18%",
@@ -52,7 +70,7 @@ const TICKER_ITEMS = [
   "Sort by worst website to find the best opportunities",
   "Export CSV to manage your pipeline",
   "Mark businesses as contacted to track progress",
-  "Demo mode works without API keys",
+  "No API keys, no billing — ever",
 ];
 
 export default function HomePage() {
@@ -60,14 +78,16 @@ export default function HomePage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterState>(DEFAULT_FILTER);
-  const [mockMode, setMockMode] = useState(true);
+  // Live search needs no keys, so it is the default. Demo mode is now a fallback for
+  // browsing the UI offline or when OpenStreetMap is throttling.
+  const [mockMode, setMockMode] = useState(false);
   const [contacted, setContacted] = useState<Set<string>>(new Set());
   const [searchMeta, setSearchMeta] = useState<{
     city: string;
     industry: string;
   } | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
-  const [source, setSource] = useState<"google" | "mock" | null>(null);
+  const [source, setSource] = useState<string | null>(null);
 
   // Load contacted from localStorage
   useEffect(() => {
@@ -126,13 +146,13 @@ export default function HomePage() {
             a.websiteScore.score - b.websiteScore.score
         );
         break;
+      // OpenStreetMap has no ratings or review counts. Rather than treating a missing
+      // value as zero and scattering unknowns through the list, they sink to the end.
       case "most_reviews":
-        result.sort(
-          (a, b) => (b.reviewCount ?? 0) - (a.reviewCount ?? 0)
-        );
+        result.sort(byOptionalDesc((b) => b.reviewCount));
         break;
       case "highest_rating":
-        result.sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
+        result.sort(byOptionalDesc((b) => b.rating));
         break;
       case "alphabetical":
         result.sort((a, b) => a.name.localeCompare(b.name));
@@ -295,7 +315,7 @@ export default function HomePage() {
               </h3>
               <p className="text-sm font-mono text-slate-500 max-w-md">{error}</p>
               <p className="text-xs font-mono text-amber-500/60 mt-3">
-                Tip: Enable Demo mode to test without API keys
+                Tip: switch on Demo mode to browse sample leads while upstream recovers
               </p>
             </div>
           </div>
@@ -330,10 +350,10 @@ export default function HomePage() {
               <span className="text-slate-500">{searchMeta?.industry}</span>
               <ChevronRight size={12} />
               <span className="text-slate-500">{searchMeta?.city}</span>
-              {source === "mock" && (
+              {source && (
                 <>
                   <ChevronRight size={12} />
-                  <span className="text-amber-500/60">Demo data</span>
+                  <span className="text-amber-500/60">{SOURCE_LABELS[source] ?? source}</span>
                 </>
               )}
             </div>
@@ -396,12 +416,12 @@ export default function HomePage() {
                 {
                   icon: "📊",
                   title: "Score & Rank",
-                  desc: "PageSpeed + mobile scores instantly rank every business by opportunity.",
+                  desc: "Every site is fetched and audited live — speed, mobile, HTTPS, legacy tech.",
                 },
                 {
                   icon: "✉️",
                   title: "Pitch in One Click",
-                  desc: "AI-generated cold outreach tailored to each business's specific weakness.",
+                  desc: "Cold outreach written from what the audit actually found on their site.",
                 },
               ].map((card) => (
                 <div
@@ -433,7 +453,7 @@ export default function HomePage() {
             <span>LeadHunter — Web Audit Engine</span>
           </div>
           <div className="text-[11px] font-mono text-slate-700">
-            Data sourced from Google Places API · PageSpeed Insights
+            Business data © OpenStreetMap contributors · Sites audited in-house
           </div>
         </div>
       </footer>

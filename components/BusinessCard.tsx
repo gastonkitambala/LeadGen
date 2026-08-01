@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import {
   Phone,
@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { Business } from "@/types";
 import { STATUS_CONFIG } from "@/lib/websiteScorer";
+import { isOpenNow } from "@/lib/osm/openingHours";
 import PitchModal from "@/components/PitchModal";
 import clsx from "clsx";
 
@@ -48,6 +49,21 @@ const OPPORTUNITY_LABELS: Record<string, string> = {
   DECENT: "Soft Lead",
 };
 
+/**
+ * The audit measures load time directly; demo records predate it and carry a
+ * PageSpeed number instead. Show whichever the record actually has.
+ */
+function formatAuditMetric(business: Business): string {
+  const { loadMs, mobileScore } = business.websiteScore;
+  if (loadMs !== undefined) {
+    return loadMs >= 1000
+      ? `Loads in ${(loadMs / 1000).toFixed(1)}s`
+      : `Loads in ${Math.round(loadMs)}ms`;
+  }
+  if (mobileScore !== undefined) return `Mobile: ${mobileScore}/100`;
+  return "";
+}
+
 const OPPORTUNITY_COLORS: Record<string, string> = {
   NO_WEBSITE: "text-red-400 bg-red-950/50 border-red-500/30",
   BROKEN: "text-orange-400 bg-orange-950/50 border-orange-500/30",
@@ -65,6 +81,13 @@ export default function BusinessCard({
   const [showPitch, setShowPitch] = useState(false);
   const [showHours, setShowHours] = useState(false);
   const [imgError, setImgError] = useState(false);
+  const [openNow, setOpenNow] = useState<boolean | undefined>(undefined);
+
+  // Resolved after mount, not during render: open/closed depends on the viewer's
+  // clock, and the server's answer would differ and trip a hydration mismatch.
+  useEffect(() => {
+    setOpenNow(business.hours?.open_now ?? isOpenNow(business.hours));
+  }, [business.hours]);
 
   const status = business.websiteScore.status;
   const statusCfg = STATUS_CONFIG[status];
@@ -175,14 +198,14 @@ export default function BusinessCard({
                   </span>
                 </div>
               )}
-              {business.hours?.open_now !== undefined && (
+              {openNow !== undefined && (
                 <span
                   className={clsx(
                     "text-xs font-mono",
-                    business.hours.open_now ? "text-emerald-500" : "text-red-400"
+                    openNow ? "text-emerald-500" : "text-red-400"
                   )}
                 >
-                  {business.hours.open_now ? "● Open" : "● Closed"}
+                  {openNow ? "● Open" : "● Closed"}
                 </span>
               )}
             </div>
@@ -250,9 +273,7 @@ export default function BusinessCard({
                 Lead Strength
               </span>
               <span className="text-[10px] font-mono text-slate-500">
-                {business.websiteScore.mobileScore !== undefined
-                  ? `Mobile: ${business.websiteScore.mobileScore}/100`
-                  : ""}
+                {formatAuditMetric(business)}
               </span>
             </div>
             <div className="h-1.5 bg-bg-muted rounded-full overflow-hidden">
@@ -275,6 +296,16 @@ export default function BusinessCard({
               />
             </div>
           </div>
+
+          {/* Hours we could not parse are still worth showing verbatim. */}
+          {!business.hours?.weekday_text && business.rawHours && (
+            <div className="flex items-start gap-2">
+              <Clock size={11} className="text-slate-600 mt-0.5 flex-shrink-0" />
+              <span className="text-[11px] font-mono text-slate-500 leading-relaxed">
+                {business.rawHours}
+              </span>
+            </div>
+          )}
 
           {/* Hours toggle */}
           {business.hours?.weekday_text && (

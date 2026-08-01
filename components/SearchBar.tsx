@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { Search, MapPin, Briefcase, ChevronDown, Zap } from "lucide-react";
-import { INDUSTRY_OPTIONS } from "@/lib/mockData";
+import { INDUSTRY_OPTIONS } from "@/lib/providers/industryTags";
 import clsx from "clsx";
 
 interface SearchBarProps {
@@ -183,7 +183,7 @@ export default function SearchBar({
             <button
               type="button"
               onClick={onToggleMock}
-              title={mockMode ? "Demo mode active — using mock data" : "Click for demo mode"}
+              title={mockMode ? "Demo mode active — showing sample leads" : "Click for demo mode"}
               className={clsx(
                 "px-3 py-3 rounded-lg border font-mono text-xs tracking-wider flex items-center gap-1.5 transition-all duration-200",
                 mockMode
@@ -201,7 +201,7 @@ export default function SearchBar({
       {mockMode && (
         <p className="mt-2 text-xs font-mono text-amber-500/60 flex items-center gap-1.5">
           <Zap size={11} className="fill-amber-500/60" />
-          Demo mode active — using mock data, no API key needed
+          Demo mode active — showing sample leads instead of running a live search
         </p>
       )}
     </form>

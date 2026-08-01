@@ -26,10 +26,18 @@ export interface WebsiteScore {
   score: number; // 0–100, lower = worse = better lead
   label: string;
   reason: string;
+  /** Measured response time of the audited site, in milliseconds. */
+  loadMs?: number;
+  /** Human-readable problems the audit found, worst first. */
+  issues?: string[];
+  /** Only present on demo data, which predates the built-in audit engine. */
   mobileScore?: number;
   desktopScore?: number;
   lastChecked?: string;
 }
+
+/** Where a business record came from. */
+export type BusinessSource = "osm" | "foursquare" | "mock";
 
 export interface Business {
   id: string;
@@ -49,6 +57,9 @@ export interface Business {
   placeId: string;
   lat?: number;
   lng?: number;
+  source: BusinessSource;
+  /** Raw OSM `opening_hours` value, kept when we could not parse it. */
+  rawHours?: string;
 }
 
 export interface SearchParams {

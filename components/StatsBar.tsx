@@ -1,27 +1,47 @@
 "use client";
 
 import { Business } from "@/types";
-import { TrendingUp, WifiOff, AlertTriangle, Smartphone, Globe } from "lucide-react";
+import {
+  TrendingUp,
+  WifiOff,
+  AlertTriangle,
+  Smartphone,
+  Star,
+  Clock,
+} from "lucide-react";
 import clsx from "clsx";
 
 interface StatsBarProps {
   businesses: Business[];
 }
 
+interface Stat {
+  icon: typeof TrendingUp;
+  label: string;
+  value: string | number;
+  color: string;
+  bg: string;
+  sub?: string;
+}
+
 export default function StatsBar({ businesses }: StatsBarProps) {
   if (businesses.length === 0) return null;
 
-  const noWebsite = businesses.filter((b) => b.websiteScore.status === "NO_WEBSITE").length;
-  const broken = businesses.filter((b) => b.websiteScore.status === "BROKEN").length;
+  const noWebsite = businesses.filter(
+    (b) => b.websiteScore.status === "NO_WEBSITE"
+  ).length;
+  const broken = businesses.filter(
+    (b) => b.websiteScore.status === "BROKEN"
+  ).length;
   const poorMobile = businesses.filter(
-    (b) => b.websiteScore.status === "POOR_MOBILE" || b.websiteScore.status === "OUTDATED"
+    (b) => b.websiteScore.status === "POOR_MOBILE"
+  ).length;
+  const outdated = businesses.filter(
+    (b) => b.websiteScore.status === "OUTDATED"
   ).length;
   const contacted = businesses.filter((b) => b.contacted).length;
-  const hotLeads = noWebsite + broken;
-  const avgRating =
-    businesses.reduce((acc, b) => acc + (b.rating ?? 0), 0) / businesses.length;
 
-  const stats = [
+  const stats: Stat[] = [
     {
       icon: TrendingUp,
       label: "Total Leads",
@@ -32,7 +52,7 @@ export default function StatsBar({ businesses }: StatsBarProps) {
     {
       icon: WifiOff,
       label: "Hot Leads",
-      value: hotLeads,
+      value: noWebsite + broken,
       color: "text-red-400",
       bg: "bg-red-500/10",
       sub: "No website / broken",
@@ -43,15 +63,11 @@ export default function StatsBar({ businesses }: StatsBarProps) {
       value: poorMobile,
       color: "text-violet-400",
       bg: "bg-violet-500/10",
+      sub: "Not phone-friendly",
     },
-    {
-      icon: Globe,
-      label: "Avg Rating",
-      value: avgRating.toFixed(1),
-      color: "text-sky-400",
-      bg: "bg-sky-500/10",
-      sub: "across all leads",
-    },
+    // OpenStreetMap carries no ratings, so this tile adapts to what we actually have
+    // rather than averaging a column of undefined down to 0.0.
+    ratingOrOutdatedStat(businesses, outdated),
     {
       icon: AlertTriangle,
       label: "Contacted",
@@ -88,4 +104,31 @@ export default function StatsBar({ businesses }: StatsBarProps) {
       ))}
     </div>
   );
+}
+
+function ratingOrOutdatedStat(businesses: Business[], outdated: number): Stat {
+  const rated = businesses.filter((b) => typeof b.rating === "number");
+
+  if (rated.length === 0) {
+    return {
+      icon: Clock,
+      label: "Outdated Sites",
+      value: outdated,
+      color: "text-yellow-400",
+      bg: "bg-yellow-500/10",
+      sub: "Legacy tech or stale",
+    };
+  }
+
+  const average =
+    rated.reduce((total, b) => total + (b.rating ?? 0), 0) / rated.length;
+
+  return {
+    icon: Star,
+    label: "Avg Rating",
+    value: average.toFixed(1),
+    color: "text-sky-400",
+    bg: "bg-sky-500/10",
+    sub: `across ${rated.length} rated`,
+  };
 }

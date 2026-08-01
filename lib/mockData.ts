@@ -1,6 +1,8 @@
 import { Business } from "@/types";
 
-export const MOCK_BUSINESSES: Business[] = [
+// Demo records are written without `source`; it is stamped on below so the shape
+// stays identical to what the live providers return.
+const DEMO: Omit<Business, "source">[] = [
   {
     id: "mock_001",
     name: "Tony's Barbershop",
@@ -30,7 +32,7 @@ export const MOCK_BUSINESSES: Business[] = [
       status: "NO_WEBSITE",
       score: 0,
       label: "No Website",
-      reason: "No website listed on Google Business Profile",
+      reason: "No website listed — invisible to anyone searching online",
     },
     contacted: false,
     placeId: "ChIJmock001",
@@ -439,35 +441,7 @@ export const MOCK_BUSINESSES: Business[] = [
   },
 ];
 
-export const INDUSTRY_OPTIONS = [
-  "Barbershop",
-  "Bakery",
-  "Restaurant",
-  "Plumber",
-  "Dentist",
-  "Gym",
-  "Auto Repair",
-  "Florist",
-  "Electrician",
-  "Landscaping",
-  "Veterinarian",
-  "Pizza",
-  "Cafe",
-  "Nail Salon",
-  "Hair Salon",
-  "Dry Cleaner",
-  "Locksmith",
-  "HVAC",
-  "Roofing",
-  "Painting",
-  "Cleaning Service",
-  "Daycare",
-  "Law Firm",
-  "Accounting",
-  "Chiropractor",
-  "Physical Therapy",
-  "Optometrist",
-  "Pharmacy",
-  "Jewelry Store",
-  "Furniture Store",
-];
+export const MOCK_BUSINESSES: Business[] = DEMO.map((business) => ({
+  ...business,
+  source: "mock" as const,
+}));

@@ -1,80 +1,11 @@
-import { WebsiteScore, WebsiteStatus } from "@/types";
+import { WebsiteStatus } from "@/types";
 
-export function scoreFromPageSpeed(
-  mobileScore: number,
-  desktopScore: number,
-  hasSSL: boolean
-): WebsiteScore {
-  const composite = mobileScore * 0.65 + desktopScore * 0.35;
-
-  if (!hasSSL || mobileScore < 20) {
-    return {
-      status: "OUTDATED",
-      score: Math.round(composite),
-      label: "Outdated",
-      reason: `No HTTPS + mobile score: ${mobileScore} — security risk and poor experience`,
-      mobileScore,
-      desktopScore,
-      lastChecked: new Date().toISOString().split("T")[0],
-    };
-  }
-
-  if (mobileScore < 35) {
-    return {
-      status: "POOR_MOBILE",
-      score: Math.round(composite),
-      label: "Poor Mobile",
-      reason: `Mobile PageSpeed score: ${mobileScore} — critical performance issues`,
-      mobileScore,
-      desktopScore,
-      lastChecked: new Date().toISOString().split("T")[0],
-    };
-  }
-
-  if (mobileScore < 60 || desktopScore < 65) {
-    return {
-      status: "NEEDS_WORK",
-      score: Math.round(composite),
-      label: "Needs Work",
-      reason: `Mobile: ${mobileScore}/100, Desktop: ${desktopScore}/100 — below average`,
-      mobileScore,
-      desktopScore,
-      lastChecked: new Date().toISOString().split("T")[0],
-    };
-  }
-
-  return {
-    status: "DECENT",
-    score: Math.round(composite),
-    label: "Decent",
-    reason: `Mobile: ${mobileScore}/100, Desktop: ${desktopScore}/100`,
-    mobileScore,
-    desktopScore,
-    lastChecked: new Date().toISOString().split("T")[0],
-  };
-}
-
-export function noWebsiteScore(): WebsiteScore {
-  return {
-    status: "NO_WEBSITE",
-    score: 0,
-    label: "No Website",
-    reason: "No website listed on Google Business Profile",
-  };
-}
-
-export function brokenSiteScore(url: string): WebsiteScore {
-  return {
-    status: "BROKEN",
-    score: 5,
-    label: "Broken Site",
-    reason: `Website at ${url} is unreachable or returns errors`,
-    mobileScore: 0,
-    desktopScore: 0,
-    lastChecked: new Date().toISOString().split("T")[0],
-  };
-}
-
+/**
+ * Presentation config for each website status.
+ *
+ * The scoring logic that produces these statuses lives in `lib/audit/score.ts`. This
+ * file is purely how they look, and `priority` is what "worst website first" sorts on.
+ */
 export const STATUS_CONFIG: Record<
   WebsiteStatus,
   { color: string; bg: string; border: string; dot: string; priority: number }
@@ -122,3 +53,5 @@ export const STATUS_CONFIG: Record<
     priority: 5,
   },
 };
+
+export { noWebsiteScore, socialOnlyScore, scoreAudit } from "@/lib/audit/score";

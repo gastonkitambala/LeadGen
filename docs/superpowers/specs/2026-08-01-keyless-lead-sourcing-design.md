@@ -56,13 +56,13 @@ functions move to `lib/audit/score.ts`.
 
 ## Data flow
 
-1. **Geocode.** Nominatim resolves the city string to a center point, a bounding box,
-   and an OSM element id. Their usage policy requires a descriptive `User-Agent` and
-   permits at most one request per second, which is why `rateLimit.ts` exists.
-2. **Search.** When Nominatim returns a relation or way, Overpass queries by
-   `area(...)` for precise municipal bounds. Otherwise it falls back to a radius search
-   around the center. The query uses `nwr` with `out center tags` so ways and relations
-   still carry coordinates. Only elements with a `name` tag are kept.
+1. **Geocode.** Nominatim resolves the city string to a center point and a bounding
+   box. Their usage policy requires a descriptive `User-Agent` and permits at most one
+   request per second, which is why `rateLimit.ts` exists.
+2. **Search.** Overpass queries within that bounding box, falling back to a radius
+   around the centre when the box is missing or implausibly large. The query uses `nwr`
+   with `out center tags` so ways and relations still carry coordinates. Only elements
+   with a `name` tag are kept.
 3. **Fallback.** If `FOURSQUARE_API_KEY` is set *and* OSM returned fewer than 5
    results, Foursquare is queried and the results are merged. Any Foursquare failure
    returns an empty array, so the app degrades to OSM-only rather than erroring.
@@ -128,6 +128,36 @@ It is therefore computed on the client from parsed `periods` using the browser's
 time, via a pure `isOpenNow(periods, now)` helper. This is correct for the common case
 of prospecting in your own city and clearly wrong nowhere that matters, since the
 weekday hours are always shown alongside it.
+
+## Revisions made during implementation
+
+Three parts of the plan above did not survive contact with the live service. All three
+were changed because measurement contradicted the design, and the reasoning is recorded
+here rather than only in the code.
+
+**Bounding box replaced `area()` scoping.** The plan called for querying inside an
+administrative boundary, which is more precise. In practice `area()` makes the public
+Overpass instance load an area index, and the Austin barbershop query timed out
+repeatedly at that step. The identical query scoped to Nominatim's bounding box
+returned in 1.8 seconds. Boxes wider than two degrees are discarded so a vague match
+("Texas") cannot produce an abusive query.
+
+**Retrying the same mirror was added.** The plan assumed mirror rotation was sufficient
+for upstream failure. It is not: the public instance answered a valid query with 504
+twice and then served it in under two seconds on the third try, and the alternate
+mirrors were unreachable from the test environment entirely. The client now runs three
+rounds across the mirror list. A 429 gets a six-second wait rather than the short
+backoff, because it means the IP is out of query slots — Overpass grants two — not that
+the server is momentarily busy. A 4xx other than 429 fails immediately, since a
+rejected query will be rejected identically everywhere.
+
+**Free-text search covers three categories, not six.** A name regex is unindexed, so
+each category costs a full scan of the bounding box: roughly two seconds each, measured
+at 3.2s for one category and 6.8s for three. Six blew the query's own timeout. The scan
+is now limited to `shop`, `amenity` and `leisure`, which covers the long tail free text
+is actually used for. Offices, trades and healthcare remain reachable through the
+mapped industries, which are far cheaper to query. This is a real limitation and is
+documented in the README.
 
 ## Error handling
 

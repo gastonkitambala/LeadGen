@@ -1,223 +1,121 @@
 import { NextRequest, NextResponse } from "next/server";
-import { Business } from "@/types";
-import { noWebsiteScore, brokenSiteScore, scoreFromPageSpeed } from "@/lib/websiteScorer";
+import { Business, WebsiteScore } from "@/types";
+import { auditMany } from "@/lib/audit";
+import { detectSocialPlatform, socialOnlyScore } from "@/lib/audit/score";
+import { placeToBusiness } from "@/lib/osm/toBusiness";
+import { geocodeCity, GeocodeError } from "@/lib/providers/nominatim";
+import { searchOverpass, OverpassError } from "@/lib/providers/overpass";
+import { isFoursquareEnabled, searchFoursquare } from "@/lib/providers/foursquare";
+import { mergePlaces } from "@/lib/providers/merge";
+import { resolveIndustry } from "@/lib/providers/industryTags";
+import { RawPlace } from "@/lib/providers/types";
 
-const PLACES_API_BASE = "https://maps.googleapis.com/maps/api/place";
+/** Below this many OSM hits, Foursquare is worth asking — if a key is configured. */
+const SPARSE_RESULT_THRESHOLD = 5;
 
-interface PlaceResult {
-  place_id: string;
-  name: string;
-  formatted_address: string;
-  formatted_phone_number?: string;
-  website?: string;
-  rating?: number;
-  user_ratings_total?: number;
-  geometry: { location: { lat: number; lng: number } };
-  photos?: { photo_reference: string }[];
-  opening_hours?: {
-    open_now: boolean;
-    weekday_text?: string[];
-    periods?: {
-      open: { day: number; time: string };
-      close?: { day: number; time: string };
-    }[];
-  };
-  url?: string;
-}
+/** Auditing is the slow part; more than this makes users wait too long. */
+const MAX_AUDITED = 40;
 
-async function getPlaceDetails(placeId: string, apiKey: string): Promise<PlaceResult | null> {
-  const fields = [
-    "name",
-    "formatted_address",
-    "formatted_phone_number",
-    "website",
-    "rating",
-    "user_ratings_total",
-    "geometry",
-    "photos",
-    "opening_hours",
-    "url",
-  ].join(",");
-
-  const url = `${PLACES_API_BASE}/details/json?place_id=${placeId}&fields=${fields}&key=${apiKey}`;
-  const res = await fetch(url);
-  const data = await res.json();
-
-  if (data.status !== "OK") return null;
-  return data.result as PlaceResult;
-}
-
-async function getPageSpeedScore(
-  url: string,
-  apiKey: string
-): Promise<{ mobile: number; desktop: number; hasSSL: boolean } | null> {
-  try {
-    const hasSSL = url.startsWith("https://");
-    const strategy = "mobile";
-    const psUrl = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url=${encodeURIComponent(url)}&strategy=${strategy}&key=${apiKey}`;
-
-    const mobileRes = await fetch(psUrl);
-    const mobileData = await mobileRes.json();
-
-    const mobileScore = Math.round(
-      (mobileData?.lighthouseResult?.categories?.performance?.score ?? 0) * 100
-    );
-
-    const desktopRes = await fetch(
-      psUrl.replace("strategy=mobile", "strategy=desktop")
-    );
-    const desktopData = await desktopRes.json();
-    const desktopScore = Math.round(
-      (desktopData?.lighthouseResult?.categories?.performance?.score ?? 0) * 100
-    );
-
-    return { mobile: mobileScore, desktop: desktopScore, hasSSL };
-  } catch {
-    return null;
-  }
-}
-
-async function checkWebsiteAlive(url: string): Promise<boolean> {
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5000);
-    const res = await fetch(url, {
-      method: "HEAD",
-      signal: controller.signal,
-      redirect: "follow",
-    });
-    clearTimeout(timeout);
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
-  const city = searchParams.get("city");
-  const industry = searchParams.get("industry");
+  const city = searchParams.get("city")?.trim() ?? "";
+  const industryInput = searchParams.get("industry")?.trim() ?? "";
   const mock = searchParams.get("mock") === "true";
 
   if (mock) {
-    // Return mock data — imported dynamically to avoid bundling in prod
     const { MOCK_BUSINESSES } = await import("@/lib/mockData");
-    // Simulate delay
-    await new Promise((r) => setTimeout(r, 800));
+    await new Promise((resolve) => setTimeout(resolve, 600));
     return NextResponse.json({ businesses: MOCK_BUSINESSES, source: "mock" });
   }
 
-  if (!city || !industry) {
+  if (!city || !industryInput) {
     return NextResponse.json(
-      { error: "city and industry are required" },
+      { error: "Both a city and an industry are required" },
       { status: 400 }
     );
   }
 
-  const PLACES_KEY = process.env.GOOGLE_PLACES_API_KEY;
-  const PS_KEY = process.env.GOOGLE_PAGESPEED_API_KEY || PLACES_KEY;
-
-  if (!PLACES_KEY) {
-    return NextResponse.json(
-      { error: "GOOGLE_PLACES_API_KEY not configured. Use mock mode for demo." },
-      { status: 500 }
-    );
-  }
-
   try {
-    // Text search for businesses
-    const query = `${industry} in ${city}`;
-    const searchUrl = `${PLACES_API_BASE}/textsearch/json?query=${encodeURIComponent(query)}&key=${PLACES_KEY}`;
-    const searchRes = await fetch(searchUrl);
-    const searchData = await searchRes.json();
+    const area = await geocodeCity(city);
+    const industry = resolveIndustry(industryInput);
 
-    if (searchData.status !== "OK" && searchData.status !== "ZERO_RESULTS") {
-      return NextResponse.json(
-        { error: `Places API error: ${searchData.status}` },
-        { status: 502 }
-      );
-    }
+    const osmPlaces = await searchOverpass(area, industry);
 
-    const placeIds: string[] = (searchData.results ?? [])
-      .slice(0, 20)
-      .map((r: { place_id: string }) => r.place_id);
+    // Foursquare only fills in where OpenStreetMap is thin, and only when configured.
+    const needsFallback =
+      osmPlaces.length < SPARSE_RESULT_THRESHOLD && isFoursquareEnabled();
+    const fsqPlaces = needsFallback
+      ? await searchFoursquare(area, industry.label)
+      : [];
 
-    // Fetch details for each place (parallel, max 20)
-    const detailsResults = await Promise.allSettled(
-      placeIds.map((id) => getPlaceDetails(id, PLACES_KEY))
-    );
+    const places = mergePlaces(osmPlaces, fsqPlaces).slice(0, MAX_AUDITED);
+    const businesses = await buildBusinesses(places, industry.label, city);
 
-    const businesses: Business[] = [];
-
-    for (let i = 0; i < detailsResults.length; i++) {
-      const result = detailsResults[i];
-      if (result.status !== "fulfilled" || !result.value) continue;
-
-      const place = result.value;
-      const placeId = placeIds[i];
-
-      let websiteScore = place.website
-        ? null
-        : noWebsiteScore();
-
-      if (place.website && !websiteScore) {
-        const alive = await checkWebsiteAlive(place.website);
-        if (!alive) {
-          websiteScore = brokenSiteScore(place.website);
-        } else if (PS_KEY) {
-          const ps = await getPageSpeedScore(place.website, PS_KEY);
-          if (ps) {
-            websiteScore = scoreFromPageSpeed(ps.mobile, ps.desktop, ps.hasSSL);
-          }
-        }
-      }
-
-      if (!websiteScore) {
-        websiteScore = {
-          status: "NEEDS_WORK",
-          score: 50,
-          label: "Needs Work",
-          reason: "Could not fetch PageSpeed data",
-        };
-      }
-
-      const photoUrl = place.photos?.[0]?.photo_reference
-        ? `${PLACES_API_BASE}/photo?maxwidth=400&photoreference=${place.photos[0].photo_reference}&key=${PLACES_KEY}`
-        : undefined;
-
-      businesses.push({
-        id: placeId,
-        name: place.name,
-        address: place.formatted_address,
-        phone: place.formatted_phone_number,
-        website: place.website,
-        mapsUrl: place.url || `https://maps.google.com/?place_id=${placeId}`,
-        rating: place.rating,
-        reviewCount: place.user_ratings_total,
-        hours: place.opening_hours
-          ? {
-              open_now: place.opening_hours.open_now,
-              weekday_text: place.opening_hours.weekday_text,
-              periods: place.opening_hours.periods,
-            }
-          : undefined,
-        photoUrl,
-        industry,
-        city,
-        websiteScore,
-        contacted: false,
-        placeId,
-        lat: place.geometry.location.lat,
-        lng: place.geometry.location.lng,
-      });
-    }
-
-    return NextResponse.json({ businesses, source: "google" });
+    return NextResponse.json({
+      businesses,
+      source: fsqPlaces.length > 0 ? "osm+foursquare" : "osm",
+      area: area.displayName,
+      industry: industry.label,
+    });
   } catch (error) {
-    console.error("Search API error:", error);
+    return errorResponse(error);
+  }
+}
+
+async function buildBusinesses(
+  places: RawPlace[],
+  industry: string,
+  city: string
+): Promise<Business[]> {
+  // A social profile is not a website. Skip the network call and score it directly —
+  // it is a stronger lead than most of the sites we would have audited anyway.
+  const socialScores = new Map<number, WebsiteScore>();
+
+  const auditUrls = places.map((place, index) => {
+    if (!place.website) return undefined;
+    const platform = detectSocialPlatform(place.website);
+    if (platform) {
+      socialScores.set(index, socialOnlyScore(platform));
+      return undefined;
+    }
+    return place.website;
+  });
+
+  const auditedScores = await auditMany(auditUrls);
+
+  return places.map((place, index) =>
+    placeToBusiness(place, {
+      industry,
+      city,
+      websiteScore: socialScores.get(index) ?? auditedScores[index],
+    })
+  );
+}
+
+function errorResponse(error: unknown): NextResponse {
+  if (error instanceof GeocodeError) {
     return NextResponse.json(
-      { error: "Failed to fetch business data" },
-      { status: 500 }
+      { error: error.message },
+      { status: error.kind === "not-found" ? 404 : 502 }
     );
   }
+
+  if (error instanceof OverpassError) {
+    return NextResponse.json(
+      {
+        error:
+          "OpenStreetMap search is unavailable right now. It is a free service and throttles under load — try again in a moment.",
+      },
+      { status: 502 }
+    );
+  }
+
+  console.error("Search failed:", error);
+  return NextResponse.json(
+    { error: "Something went wrong while searching for leads" },
+    { status: 500 }
+  );
 }

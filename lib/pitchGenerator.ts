@@ -1,56 +1,157 @@
 import { Business, WebsiteStatus } from "@/types";
 
-const WEAKNESS_LINES: Record<WebsiteStatus, string[]> = {
+/**
+ * Builds a cold-outreach opener from what the audit actually found.
+ *
+ * Templates are tagged with the data they interpolate. OpenStreetMap has no review
+ * counts and the audit has no PageSpeed number, so a template that mentions either is
+ * only eligible when that field is genuinely present — otherwise the pitch goes out
+ * saying "with 0 five-star reviews", which is worse than saying nothing.
+ */
+
+interface Template {
+  text: string;
+  /** Fields this template interpolates. Only drawn when all of them exist. */
+  requires?: ("reviews" | "website" | "loadTime" | "issues")[];
+}
+
+const WEAKNESS_LINES: Record<WebsiteStatus, Template[]> = {
   NO_WEBSITE: [
-    "I noticed {name} doesn't have a website yet — in {city}, that means potential customers searching online are finding your competitors instead.",
-    "I searched for {industry} services in {city} and couldn't find a website for {name}. You're losing leads every day to businesses with an online presence.",
-    "With {reviews} 5-star reviews, {name} clearly does great work. But without a website, you're invisible to the 80% of customers who search Google before choosing a {industry}.",
+    {
+      text: "I noticed {name} doesn't have a website — which means when someone in {city} searches for a {industry}, they're finding your competitors instead of you.",
+    },
+    {
+      text: "I went looking for {name} online and couldn't find a website anywhere. Every one of those searches is a customer who ended up somewhere else.",
+    },
+    {
+      text: "You're on the map but not on the web — {name} has no website, so you're invisible to the people who search before they call.",
+    },
+    {
+      text: "With {reviews} reviews, {name} clearly does good work. But without a website, most people searching for a {industry} in {city} will never find out.",
+      requires: ["reviews"],
+    },
   ],
   BROKEN: [
-    "I just visited {name}'s website and got a 404 error — the domain may have expired. Anyone who tries to find you online right now hits a dead end.",
-    "Your website at {website} appears to be down. This is actually costing you customers who are actively trying to reach you.",
-    "I found {name} on Google Maps but your website is returning errors. With {reviews} reviews, you deserve a site that actually works.",
+    {
+      text: "I just tried to visit {name}'s website and it doesn't load. Anyone trying to find you online right now is hitting a dead end.",
+    },
+    {
+      text: "Your site at {website} appears to be down. That's not a cosmetic problem — it's actively costing you customers who are trying to reach you.",
+      requires: ["website"],
+    },
+    {
+      text: "I found {name} while researching {industry} businesses in {city}, but your website is returning an error. Worth knowing about, if nobody's told you.",
+    },
   ],
   OUTDATED: [
-    "I visited {name}'s website and it looks like it hasn't been updated since around 2010 — it's not mobile-friendly, and 70% of your potential customers are on phones.",
-    "Your website for {name} looks dated and isn't optimized for mobile devices. Customers searching on their phones are likely bouncing to a competitor.",
-    "I checked {name}'s site — it has real character, but it's not showing up well in Google search and doesn't work great on mobile.",
+    {
+      text: "I had a look at {name}'s website — {issues}. It's the kind of thing customers notice, even when they can't say why.",
+      requires: ["issues"],
+    },
+    {
+      text: "Your website has clearly been around a while, and it's showing. On a phone it's close to unusable, which is where most people searching for a {industry} start.",
+    },
+    {
+      text: "I checked {name}'s site. It has character, but it's built on technology that browsers barely support anymore, and Google ranks it accordingly.",
+    },
   ],
   POOR_MOBILE: [
-    "I ran a quick analysis on {name}'s website — it scores {mobileScore}/100 on mobile speed. Most of your visitors are on phones, and slow sites lose 53% of visitors.",
-    "Your website scored {mobileScore}/100 on Google's mobile test. In a city like {city}, most people find local {industry} services on their phone.",
-    "I checked {name}'s site performance — the mobile experience needs work. A faster, mobile-first redesign could directly increase your call volume.",
+    {
+      text: "I pulled up {name}'s website on my phone and it's not built for mobile — no responsive layout at all. That's most of your traffic pinching and zooming to read your phone number.",
+    },
+    {
+      text: "Your site doesn't adapt to phone screens. In {city}, most people looking for a {industry} are searching on mobile, and a site that fights them is a site they leave.",
+    },
+    {
+      text: "I ran a check on {name}'s website — {issues}. Fixing the mobile experience alone usually moves the needle on call volume.",
+      requires: ["issues"],
+    },
   ],
   NEEDS_WORK: [
-    "I ran an audit on {name}'s website — there are a few technical issues (missing SSL, slow load times) that are hurting your Google ranking and costing you leads.",
-    "Your site has good bones but is being held back by some technical issues I spotted. These are fixable and would make a real difference to your search visibility.",
-    "I checked {name}'s website score — it's at {mobileScore}/100 on mobile. Small improvements could push you above competitors in {city} search results.",
+    {
+      text: "I audited {name}'s website and found a few things holding it back: {issues}. All fixable, and all currently costing you search visibility.",
+      requires: ["issues"],
+    },
+    {
+      text: "Your site has good bones, but it takes {loadTime} to load. Visitors start leaving after about three seconds.",
+      requires: ["loadTime"],
+    },
+    {
+      text: "I had a look at {name}'s website — nothing dramatic, but there are some technical issues quietly costing you ranking against other {industry} businesses in {city}.",
+    },
   ],
   DECENT: [
-    "I was researching {industry} businesses in {city} and came across {name}. Your site is solid — I have a few ideas to take it to the next level.",
-    "I found {name} while researching local {industry} businesses. There are some conversion-rate improvements that could turn more visitors into actual customers.",
-    "Your site is better than most in {city}, but I spotted a few things that could meaningfully improve your lead generation.",
+    {
+      text: "I was researching {industry} businesses in {city} and came across {name}. Your site is genuinely solid — which is rare. I had a couple of ideas about turning more of those visitors into calls.",
+    },
+    {
+      text: "Your website is better than most of what I see in this industry. That usually means the opportunity isn't the site itself, it's what happens after someone lands on it.",
+    },
+    {
+      text: "I found {name} while looking at {industry} businesses around {city}. No complaints about the site — but there's a gap between visitors and enquiries that's worth a conversation.",
+    },
   ],
 };
 
-const CLOSERS = [
-  "I specialize in building modern websites for local {industry} businesses that generate real leads. Would a 15-minute call this week make sense?",
-  "I build fast, mobile-first websites specifically for local service businesses like yours. Happy to do a free audit call — no pressure, just value.",
-  "I've helped similar businesses in {city} significantly increase their inbound calls. Would love to show you what's possible in a quick call.",
-  "I do web design for local businesses in {city} and this is exactly the kind of problem I solve. Can I send over a few examples?",
+const CLOSERS: Template[] = [
+  {
+    text: "I build websites for local {industry} businesses that actually generate calls. Would fifteen minutes this week be useful?",
+  },
+  {
+    text: "I do fast, mobile-first sites for local service businesses. Happy to walk you through a free audit — no pitch, just what I found.",
+  },
+  {
+    text: "I've done this for other businesses around {city} and it tends to pay for itself quickly. Can I send over a couple of examples?",
+  },
+  {
+    text: "This is exactly the kind of thing I fix for local businesses. Worth a short call?",
+  },
 ];
 
-function pick<T>(arr: T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)];
+export function generatePitch(business: Business, random = Math.random): string {
+  const available = availableFields(business);
+  const status = business.websiteScore.status;
+
+  const weakness = pick(
+    eligible(WEAKNESS_LINES[status] ?? WEAKNESS_LINES.NEEDS_WORK, available),
+    random
+  );
+  const closer = pick(eligible(CLOSERS, available), random);
+
+  const body = `Hi, I'm [Your Name] — ${weakness}\n\n${closer}\n\n— [Your Name]\n[Your Phone/Email]`;
+  return fill(body, business);
 }
 
-export function generatePitch(business: Business): string {
-  const status = business.websiteScore.status;
-  const weaknessTemplates = WEAKNESS_LINES[status] || WEAKNESS_LINES.NEEDS_WORK;
-  const weaknessLine = pick(weaknessTemplates);
-  const closer = pick(CLOSERS);
+function availableFields(business: Business): Set<string> {
+  const fields = new Set<string>();
+  const score = business.websiteScore;
 
-  const template = `Hi, I'm [Your Name] — ${weaknessLine}\n\n${closer}\n\n— [Your Name]\n[Your Phone/Email]`;
+  if ((business.reviewCount ?? 0) > 0) fields.add("reviews");
+  if (business.website) fields.add("website");
+  if (score.loadMs !== undefined) fields.add("loadTime");
+  if (score.issues && score.issues.length > 0) fields.add("issues");
+
+  return fields;
+}
+
+/**
+ * Keeps templates whose required fields all exist. Falls back to the unconditional
+ * templates if filtering leaves nothing, so there is always something to send.
+ */
+function eligible(templates: Template[], available: Set<string>): Template[] {
+  const usable = templates.filter((t) =>
+    (t.requires ?? []).every((field) => available.has(field))
+  );
+  return usable.length > 0 ? usable : templates.filter((t) => !t.requires);
+}
+
+function pick(templates: Template[], random: () => number): string {
+  if (templates.length === 0) return "";
+  return templates[Math.floor(random() * templates.length)].text;
+}
+
+function fill(template: string, business: Business): string {
+  const issues = business.websiteScore.issues ?? [];
 
   return template
     .replace(/{name}/g, business.name)
@@ -59,5 +160,18 @@ export function generatePitch(business: Business): string {
     .replace(/{reviews}/g, String(business.reviewCount ?? 0))
     .replace(/{rating}/g, String(business.rating ?? ""))
     .replace(/{website}/g, business.website ?? "your website")
-    .replace(/{mobileScore}/g, String(business.websiteScore.mobileScore ?? "low"));
+    .replace(/{loadTime}/g, formatLoad(business.websiteScore.loadMs))
+    .replace(/{issues}/g, formatIssues(issues));
+}
+
+function formatIssues(issues: string[]): string {
+  const top = issues.slice(0, 2);
+  if (top.length === 0) return "a few technical issues";
+  if (top.length === 1) return top[0];
+  return `${top[0]} and ${top[1]}`;
+}
+
+function formatLoad(ms: number | undefined): string {
+  if (ms === undefined) return "a while";
+  return ms >= 1000 ? `${(ms / 1000).toFixed(1)} seconds` : `${Math.round(ms)}ms`;
 }
